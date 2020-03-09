@@ -16,6 +16,7 @@ package deployment
 
 import (
 	"istio.io/istio/pkg/test/framework/components/environment"
+	"istio.io/istio/pkg/test/framework/components/environment/kube"
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	"istio.io/istio/pkg/test/framework/resource"
 )
@@ -29,6 +30,9 @@ type Instance interface {
 
 	// Namespace of the deployment, if any.
 	Namespace() namespace.Instance
+
+	// Environment of the deployment
+	Env() *kube.Environment
 }
 
 type Config struct {
