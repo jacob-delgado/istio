@@ -44,14 +44,11 @@ func TestBlackHoleCluster_HttpMetric(t *testing.T) {
 			// the sleep service deployed has a named http port, thus the wildcard virtual outbound
 			// listener on port 80 will be used for http metrics
 			sleepInst := sleep.DeployOrFail(t, ctx, sleep.Config{Namespace: sleepNs, Cfg: sleep.Sleep})
-			respCode, err := sleepInst.Curl("http://prow.istio.io")
+			_, err := sleepInst.Curl("http://prow.istio.io")
 			if err != nil {
 				t.Fatalf("Unable to exec curl http://prow.istio.io from sleep pod: %v", err)
 			}
-			if respCode != "502" {
-				t.Fatalf("502 not returned from sleep pod; received http response code: %s", respCode)
-			}
-			query := `sum(istio_requests_total{destination_service_name="BlackHoleCluster"})`
+			query := `sum(istio_requests_total{destination_service="prow.istio.io",destination_service_name="BlackHoleCluster",response_code="502"})`
 			util.ValidateMetric(t, prom, query, "istio_requests_total", 1)
 		})
 }
@@ -65,12 +62,9 @@ func TestBlackHoleCluster_TcpMetric(t *testing.T) {
 			// tcp matching virtual outbound listener
 			sleepInst := sleep.DeployOrFail(t, ctx, sleep.Config{Namespace: sleepNs, Cfg: sleep.Sleep})
 
-			respCode, err := sleepInst.Curl("https://prow.istio.io")
+			_, err := sleepInst.Curl("https://prow.istio.io")
 			if err == nil {
 				t.Fatal("expected exec curl https://prow.istio.io from sleep pod to error out")
-			}
-			if respCode != "000" {
-				t.Fatalf("000 not returned from sleep pod; received http response code: %s", respCode)
 			}
 			query := `sum(istio_tcp_connections_closed_total{destination_service="BlackHoleCluster",destination_service_name="BlackHoleCluster"})`
 			util.ValidateMetric(t, prom, query, "istio_tcp_connections_closed_total", 1)
