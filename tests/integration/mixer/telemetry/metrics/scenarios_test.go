@@ -200,8 +200,6 @@ values:
     enabled: true
   global:
     disablePolicyChecks: false
-    outboundTrafficPolicy:
-      mode: REGISTRY_ONLY
   telemetry:
     v1:
       enabled: true
