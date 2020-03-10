@@ -31,35 +31,48 @@ import (
 )
 
 var (
-	sleepNs    namespace.Instance
-	ist        istio.Instance
-	prom       prometheus.Instance
+	sleepNs namespace.Instance
+	ist     istio.Instance
+	prom    prometheus.Instance
 )
 
-func TestPassthroughClusterMetric(t *testing.T) {
+func TestPassthroughCluster_HttpMetric(t *testing.T) {
 	framework.
 		NewTest(t).
 		RequiresEnvironment(environment.Kube).
 		Run(func(ctx framework.TestContext) {
+			// the sleep service deployed has a named http port, thus the wildcard virtual outbound
+			// listener on port 80 will be used for http metrics
 			sleepInst := sleep.DeployOrFail(t, ctx, sleep.Config{Namespace: sleepNs, Cfg: sleep.Sleep})
-			respCode, err := sleepInst.Curl("http://istio.io")
+			respCode, err := sleepInst.Curl("http://prow.istio.io")
 			if err != nil {
-				t.Fatalf("Unable to exec curl http://istio.io from sleep pod: %v", err)
+				t.Fatalf("Unable to exec curl http://prow.istio.io from sleep pod: %v", err)
 			}
 			if respCode != "301" {
 				t.Fatalf("301 not returned from sleep pod; received http response code: %s", respCode)
 			}
 			query := `sum(istio_requests_total{destination_service_name="PassthroughCluster"})`
 			util.ValidateMetric(t, prom, query, "istio_requests_total", 1)
+		})
+}
 
-			respCode, err = sleepInst.Curl("https://istio.io")
+func TestPassthroughCluster_TcpMetric(t *testing.T) {
+	framework.
+		NewTest(t).
+		RequiresEnvironment(environment.Kube).
+		Run(func(ctx framework.TestContext) {
+			// no matching virtual outbound listener will be found, so it'll use the default
+			// tcp matching virtual outbound listener
+			sleepInst := sleep.DeployOrFail(t, ctx, sleep.Config{Namespace: sleepNs, Cfg: sleep.Sleep})
+
+			respCode, err := sleepInst.Curl("https://prow.istio.io")
 			if err != nil {
-				t.Fatalf("Unable to exec curl https://istio.io from sleep pod: %v", err)
+				t.Fatalf("Unable to exec curl https://prow.istio.io from sleep pod: %v", err)
 			}
 			if respCode != "200" {
 				t.Fatalf("200 not returned from sleep pod; received http response code: %s", respCode)
 			}
-			query = `sum(istio_tcp_connections_closed_total{destination_service="PassthroughCluster",destination_service_name="PassthroughCluster"})`
+			query := `sum(istio_tcp_connections_closed_total{destination_service="PassthroughCluster",destination_service_name="PassthroughCluster"})`
 			util.ValidateMetric(t, prom, query, "istio_tcp_connections_closed_total", 1)
 		})
 }
