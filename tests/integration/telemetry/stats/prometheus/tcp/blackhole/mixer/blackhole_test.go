@@ -1,0 +1,107 @@
+//  Copyright 2020 Istio Authors
+//
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+
+package mixer
+
+import (
+	"testing"
+
+	"istio.io/istio/pkg/test/framework"
+	"istio.io/istio/pkg/test/framework/components/environment"
+	"istio.io/istio/pkg/test/framework/components/galley"
+	"istio.io/istio/pkg/test/framework/components/istio"
+	"istio.io/istio/pkg/test/framework/components/mixer"
+	"istio.io/istio/pkg/test/framework/components/namespace"
+	"istio.io/istio/pkg/test/framework/components/prometheus"
+	"istio.io/istio/pkg/test/framework/components/sleep"
+	"istio.io/istio/pkg/test/framework/label"
+	"istio.io/istio/pkg/test/framework/resource"
+	util "istio.io/istio/tests/integration/mixer"
+)
+
+var (
+	sleepNs namespace.Instance
+	ist     istio.Instance
+	prom    prometheus.Instance
+)
+
+func TestBlackHoleCluster_TcpMetric(t *testing.T) {
+	framework.
+		NewTest(t).
+		RequiresEnvironment(environment.Kube).
+		Run(func(ctx framework.TestContext) {
+			// no matching virtual outbound listener will be found, so it'll use the default
+			// tcp matching virtual outbound listener
+			sleepInst := sleep.DeployOrFail(t, ctx, sleep.Config{Namespace: sleepNs, Cfg: sleep.Sleep})
+
+			_, err := sleepInst.Curl("https://prow.istio.io")
+			if err == nil {
+				t.Fatal("expected exec curl https://prow.istio.io from sleep pod to error out")
+			}
+			query := `sum(istio_tcp_connections_closed_total{destination_service="BlackHoleCluster",destination_service_name="BlackHoleCluster"})`
+			util.ValidateMetric(t, prom, query, "istio_tcp_connections_closed_total", 1)
+		})
+}
+
+func TestMain(m *testing.M) {
+	framework.
+		NewSuite("mixer_blackhole_metrics", m).
+		RequireEnvironment(environment.Kube).
+		Label(label.CustomSetup).
+		SetupOnEnv(environment.Kube, istio.Setup(&ist, func(cfg *istio.Config) {
+			cfg.ControlPlaneValues = `
+values:
+  prometheus:
+    enabled: true
+  global:
+    disablePolicyChecks: false
+    outboundTrafficPolicy:
+      mode: REGISTRY_ONLY
+  telemetry:
+    v1:
+      enabled: true
+    v2:
+      enabled: false
+components:
+  policy:
+    enabled: true
+  telemetry:
+    enabled: true`
+		})).
+		Setup(testsetup).
+		Run()
+}
+
+func testsetup(ctx resource.Context) (err error) {
+	sleepNs, err = namespace.New(ctx, namespace.Config{
+		Prefix: "istio-sleep",
+		Inject: true,
+	})
+	if err != nil {
+		return
+	}
+	g, err := galley.New(ctx, galley.Config{})
+	if err != nil {
+		return err
+	}
+	if _, err = mixer.New(ctx, mixer.Config{Galley: g}); err != nil {
+		return err
+	}
+	prom, err = prometheus.New(ctx)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}

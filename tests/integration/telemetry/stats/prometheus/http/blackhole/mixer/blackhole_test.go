@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-package blackhole
+package mixer
 
 import (
 	"testing"
@@ -24,10 +24,9 @@ import (
 	"istio.io/istio/pkg/test/framework/components/mixer"
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	"istio.io/istio/pkg/test/framework/components/prometheus"
-	"istio.io/istio/pkg/test/framework/components/sleep"
 	"istio.io/istio/pkg/test/framework/label"
 	"istio.io/istio/pkg/test/framework/resource"
-	util "istio.io/istio/tests/integration/mixer"
+	telemetry "istio.io/istio/tests/integration/telemetry/stats/prometheus"
 )
 
 var (
@@ -37,43 +36,20 @@ var (
 )
 
 func TestBlackHoleCluster_HttpMetric(t *testing.T) {
-	framework.
-		NewTest(t).
-		RequiresEnvironment(environment.Kube).
-		Run(func(ctx framework.TestContext) {
-			// the sleep service deployed has a named http port, thus the wildcard virtual outbound
-			// listener on port 80 will be used for http metrics
-			sleepInst := sleep.DeployOrFail(t, ctx, sleep.Config{Namespace: sleepNs, Cfg: sleep.Sleep})
-			_, err := sleepInst.Curl("http://prow.istio.io")
-			if err != nil {
-				t.Fatalf("Unable to exec curl http://prow.istio.io from sleep pod: %v", err)
-			}
-			query := `sum(istio_requests_total{destination_service="prow.istio.io",destination_service_name="BlackHoleCluster",response_code="502"})`
-			util.ValidateMetric(t, prom, query, "istio_requests_total", 1)
-		})
-}
-
-func TestBlackHoleCluster_TcpMetric(t *testing.T) {
-	framework.
-		NewTest(t).
-		RequiresEnvironment(environment.Kube).
-		Run(func(ctx framework.TestContext) {
-			// no matching virtual outbound listener will be found, so it'll use the default
-			// tcp matching virtual outbound listener
-			sleepInst := sleep.DeployOrFail(t, ctx, sleep.Config{Namespace: sleepNs, Cfg: sleep.Sleep})
-
-			_, err := sleepInst.Curl("https://prow.istio.io")
-			if err == nil {
-				t.Fatal("expected exec curl https://prow.istio.io from sleep pod to error out")
-			}
-			query := `sum(istio_tcp_connections_closed_total{destination_service="BlackHoleCluster",destination_service_name="BlackHoleCluster"})`
-			util.ValidateMetric(t, prom, query, "istio_tcp_connections_closed_total", 1)
-		})
+	// no matching virtual outbound listener will be found, so it'll use the default
+	// tcp matching virtual outbound listener
+	telemetry.RunExternalRequestTest(&telemetry.Config{
+		SleepNs:    sleepNs,
+		Prometheus: prom,
+		Metric:     "istio_requests_total",
+		Labels:     `destination_service="prow.istio.io",destination_service_name="BlackHoleCluster",response_code="502"`,
+		URL:        "http://prow.istio.io",
+	}, false, t)
 }
 
 func TestMain(m *testing.M) {
 	framework.
-		NewSuite("mixer_telemetry_metrics", m).
+		NewSuite("mixer_telemetry_blackhole_metrics", m).
 		RequireEnvironment(environment.Kube).
 		Label(label.CustomSetup).
 		SetupOnEnv(environment.Kube, istio.Setup(&ist, func(cfg *istio.Config) {

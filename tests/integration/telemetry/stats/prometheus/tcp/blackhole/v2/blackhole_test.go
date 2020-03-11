@@ -12,16 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-package blackhole
+package mixer
 
 import (
 	"testing"
 
 	"istio.io/istio/pkg/test/framework"
 	"istio.io/istio/pkg/test/framework/components/environment"
-	"istio.io/istio/pkg/test/framework/components/galley"
 	"istio.io/istio/pkg/test/framework/components/istio"
-	"istio.io/istio/pkg/test/framework/components/mixer"
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	"istio.io/istio/pkg/test/framework/components/prometheus"
 	"istio.io/istio/pkg/test/framework/components/sleep"
@@ -36,24 +34,8 @@ var (
 	prom    prometheus.Instance
 )
 
-func TestBlackHoleCluster_HttpMetric(t *testing.T) {
-	framework.
-		NewTest(t).
-		RequiresEnvironment(environment.Kube).
-		Run(func(ctx framework.TestContext) {
-			// the sleep service deployed has a named http port, thus the wildcard virtual outbound
-			// listener on port 80 will be used for http metrics
-			sleepInst := sleep.DeployOrFail(t, ctx, sleep.Config{Namespace: sleepNs, Cfg: sleep.Sleep})
-			_, err := sleepInst.Curl("http://prow.istio.io")
-			if err != nil {
-				t.Fatalf("Unable to exec curl http://prow.istio.io from sleep pod: %v", err)
-			}
-			query := `sum(istio_requests_total{destination_service="prow.istio.io",destination_service_name="BlackHoleCluster",response_code="502"})`
-			util.ValidateMetric(t, prom, query, "istio_requests_total", 1)
-		})
-}
-
 func TestBlackHoleCluster_TcpMetric(t *testing.T) {
+	t.Skip("https://github.com/istio/istio/issues/21566")
 	framework.
 		NewTest(t).
 		RequiresEnvironment(environment.Kube).
@@ -73,7 +55,7 @@ func TestBlackHoleCluster_TcpMetric(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	framework.
-		NewSuite("mixer_telemetry_metrics", m).
+		NewSuite("telemetry_v2_blackhole_metrics", m).
 		RequireEnvironment(environment.Kube).
 		Label(label.CustomSetup).
 		SetupOnEnv(environment.Kube, istio.Setup(&ist, func(cfg *istio.Config) {
@@ -107,13 +89,6 @@ func testsetup(ctx resource.Context) (err error) {
 	})
 	if err != nil {
 		return
-	}
-	g, err := galley.New(ctx, galley.Config{})
-	if err != nil {
-		return err
-	}
-	if _, err = mixer.New(ctx, mixer.Config{Galley: g}); err != nil {
-		return err
 	}
 	prom, err = prometheus.New(ctx)
 	if err != nil {
