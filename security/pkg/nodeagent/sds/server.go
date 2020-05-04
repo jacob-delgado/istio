@@ -121,6 +121,8 @@ type Options struct {
 
 	// whether  ControlPlaneAuthPolicy is MUTUAL_TLS
 	TLSEnabled bool
+
+	ECCKeys bool
 }
 
 // Server is the gPRC server that exposes SDS through UDS.
