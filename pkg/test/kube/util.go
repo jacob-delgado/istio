@@ -256,7 +256,7 @@ func newRetryOptions(opts ...retry.Option) []retry.Option {
 }
 
 // MutatingWebhookConfigurationsExists returns true if all of the given mutating webhook configs exist.
-func MutatingWebhookConfigurationsExists(a kubernetes.Interface, names []string) bool {
+func IsMutatingWebhookConfigurationsExists(a kubernetes.Interface, names []string) bool {
 	cfgs, err := a.AdmissionregistrationV1().MutatingWebhookConfigurations().List(context.TODO(), kubeApiMeta.ListOptions{})
 	if err != nil {
 		return false
