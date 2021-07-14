@@ -46,28 +46,16 @@ const (
 global:
   hub: %s
   tag: %s
-`
-	revisionValues = `
-global:
-  hub: %s
-  tag: %s
-
-revision: canary
-`
-	stableLabelValues = `
-global:
-  hub: %s
-  tag: %s
 
 revision: %s
-revisionTags: [%s]
 `
 	tarGzSuffix = ".tar.gz"
 
+	istioRevLabel = "istio.io/rev"
 	prodTag             = "prod"
-	revisionLabel       = "canary"
+	canaryTag = "canary"
+	latestRevisionTag   = "latest"
 	revisionChartSuffix = "-canary"
-	latestRevision      = "latest"
 )
 
 // previousChartPath is path of Helm charts for previous Istio deployments.
@@ -151,22 +139,9 @@ func deleteIstioRevision(h *helm.Helm, revision string) error {
 
 // getValuesOverrides returns the the values file created to pass into Helm override default values
 // for the hub and tag
-func getValuesOverrides(ctx framework.TestContext, valuesStr, hub, tag string) string {
+func getValuesOverrides(ctx framework.TestContext, hub, tag, revision string) string {
 	workDir := ctx.CreateTmpDirectoryOrFail("helm")
-	overrideValues := fmt.Sprintf(valuesStr, hub, tag)
-	overrideValuesFile := filepath.Join(workDir, "values.yaml")
-	if err := ioutil.WriteFile(overrideValuesFile, []byte(overrideValues), os.ModePerm); err != nil {
-		ctx.Fatalf("failed to write iop cr file: %v", err)
-	}
-
-	return overrideValuesFile
-}
-
-// getValuesOverrides returns the the values file created to pass into Helm override default values
-// for the hub and tag
-func getValuesOverridesStableLabels(ctx framework.TestContext, valuesStr, hub, tag, revision, revisionTag string) string {
-	workDir := ctx.CreateTmpDirectoryOrFail("helm")
-	overrideValues := fmt.Sprintf(valuesStr, hub, tag, revision, revisionTag)
+	overrideValues := fmt.Sprintf(defaultValues, hub, tag, revision)
 	overrideValuesFile := filepath.Join(workDir, "values.yaml")
 	if err := ioutil.WriteFile(overrideValuesFile, []byte(overrideValues), os.ModePerm); err != nil {
 		ctx.Fatalf("failed to write iop cr file: %v", err)
@@ -191,11 +166,11 @@ func performInPlaceUpgradeFunc(previousVersion string) func(framework.TestContex
 			}
 		})
 
-		overrideValuesFile := getValuesOverrides(t, defaultValues, gcrHub, previousVersion)
-		helmtest.InstallIstio(t, cs, h, tarGzSuffix, overrideValuesFile)
-		helmtest.VerifyInstallation(t, cs)
+		overrideValuesFile := getValuesOverrides(t, gcrHub, previousVersion, "")
+		helmtest.InstallIstio(t, cs, h, tarGzSuffix, overrideValuesFile, true)
+		helmtest.VerifyInstallation(t, cs, true)
 
-		oldClient, oldServer := sanitycheck.SetupTrafficTest(t, t, "")
+		_, oldClient, oldServer := sanitycheck.SetupTrafficTest(t, t, "")
 		sanitycheck.RunTrafficTestClientServer(t, oldClient, oldServer)
 
 		// now upgrade istio to the latest version found in this branch
@@ -206,11 +181,11 @@ func performInPlaceUpgradeFunc(previousVersion string) func(framework.TestContex
 			t.Fatal(err)
 		}
 
-		overrideValuesFile = getValuesOverrides(t, defaultValues, s.Hub, s.Tag)
+		overrideValuesFile = getValuesOverrides(t, s.Hub, s.Tag, "")
 		upgradeCharts(t, h, overrideValuesFile)
-		helmtest.VerifyInstallation(t, cs)
+		helmtest.VerifyInstallation(t, cs, true)
 
-		newClient, newServer := sanitycheck.SetupTrafficTest(t, t, "")
+		_, newClient, newServer := sanitycheck.SetupTrafficTest(t, t, "")
 		sanitycheck.RunTrafficTestClientServer(t, newClient, newServer)
 
 		// now check that we are compatible with N-1 proxy with N proxy
@@ -236,11 +211,11 @@ func performRevisionUpgradeFunc(previousVersion string) func(framework.TestConte
 			}
 		})
 
-		overrideValuesFile := getValuesOverrides(t, defaultValues, gcrHub, previousVersion)
-		helmtest.InstallIstio(t, cs, h, tarGzSuffix, overrideValuesFile)
-		helmtest.VerifyInstallation(t, cs)
+		overrideValuesFile := getValuesOverrides(t, gcrHub, previousVersion, "")
+		helmtest.InstallIstio(t, cs, h, tarGzSuffix, overrideValuesFile, false)
+		helmtest.VerifyInstallation(t, cs, false)
 
-		oldClient, oldServer := sanitycheck.SetupTrafficTest(t, t, "")
+		_, oldClient, oldServer := sanitycheck.SetupTrafficTest(t, t, "")
 		sanitycheck.RunTrafficTestClientServer(t, oldClient, oldServer)
 
 		// now upgrade istio to the latest version found in this branch
@@ -251,11 +226,11 @@ func performRevisionUpgradeFunc(previousVersion string) func(framework.TestConte
 			t.Fatal(err)
 		}
 
-		overrideValuesFile = getValuesOverrides(t, revisionValues, s.Hub, s.Tag)
-		helmtest.InstallIstioWithRevision(t, cs, h, tarGzSuffix, revisionChartSuffix, overrideValuesFile)
-		helmtest.VerifyInstallation(t, cs)
+		overrideValuesFile = getValuesOverrides(t, s.Hub, s.Tag, "canary")
+		helmtest.InstallIstioWithRevision(t, cs, h, tarGzSuffix, revisionChartSuffix, overrideValuesFile, false)
+		helmtest.VerifyInstallation(t, cs, false)
 
-		newClient, newServer := sanitycheck.SetupTrafficTest(t, t, revisionLabel)
+		_, newClient, newServer := sanitycheck.SetupTrafficTest(t, t, latestRevisionTag)
 		sanitycheck.RunTrafficTestClientServer(t, newClient, newServer)
 
 		// now check that we are compatible with N-1 proxy with N proxy
@@ -263,9 +238,9 @@ func performRevisionUpgradeFunc(previousVersion string) func(framework.TestConte
 	}
 }
 
-// performStableLabelRevisionUpgradeFunc returns the provided function necessary to run inside of a integration test
+// performRevisionTagsUpgradeFunc returns the provided function necessary to run inside of a integration test
 // for upgrade capability with stable label revision upgrades
-func performStableLabelRevisionUpgradeFunc(previousVersion string) func(framework.TestContext) {
+func performRevisionTagsUpgradeFunc(previousVersion string) func(framework.TestContext) {
 	return func(t framework.TestContext) {
 		cs := t.Clusters().Default().(*kubecluster.Cluster)
 		h := helm.New(cs.Filename(), filepath.Join(previousChartPath, previousVersion))
@@ -281,15 +256,16 @@ func performStableLabelRevisionUpgradeFunc(previousVersion string) func(framewor
 		//	}
 		//})
 
-		// set revisionTag to 'prod' and revision to the previous version (e.g. 1-9-0)
-		prodRevisionTag := strings.ReplaceAll(previousVersion, ".", "-")
-		overrideValuesFile := getValuesOverridesStableLabels(t, stableLabelValues, gcrHub, previousVersion, prodRevisionTag, prodTag)
-		t.Log(overrideValuesFile)
-		helmtest.InstallIstio(t, cs, h, tarGzSuffix, overrideValuesFile)
-		helmtest.VerifyInstallation(t, cs)
+		// install 1.10.0 charts with revision set to "1-10-0"
+		previousRevision := strings.ReplaceAll(previousVersion, ".", "-")
+		overrideValuesFile := getValuesOverrides(t, gcrHub, previousVersion, previousRevision)
+		helmtest.InstallIstioWithRevision(t, cs, h, tarGzSuffix, "-"+previousRevision, overrideValuesFile, true)
+		helmtest.VerifyInstallation(t, cs, false)
+		helmtest.SetRevisionTag(t, h, tarGzSuffix, previousRevision, prodTag)
+		helmtest.VerifyMutatingWebhookConfigurations(t, cs, []string{"istio-revision-tag-prod", "istio-sidecar-injector-1-10-0"})
 
-		// setup istio.io/rev tag to point to previous version (e.g. istio.io/rev=1-9-0)
-		oldNs, oldClient, oldServer := sanitycheck.SetupTrafficTest(t, t, prodRevisionTag)
+		// setup istio.io/rev tag to point to previous version (e.g. istio.io/rev=1-10-0)
+		oldNs, oldClient, oldServer := sanitycheck.SetupTrafficTest(t, t, previousRevision)
 		sanitycheck.RunTrafficTestClientServer(t, oldClient, oldServer)
 
 		// now upgrade istio to the latest version found in this branch
@@ -300,27 +276,33 @@ func performStableLabelRevisionUpgradeFunc(previousVersion string) func(framewor
 			t.Fatal(err)
 		}
 
-		// set revisionTag to 'canary'
-		overrideValuesFile = getValuesOverridesStableLabels(t, stableLabelValues, s.Hub, s.Tag, latestRevision, revisionLabel)
-		t.Log(overrideValuesFile)
-		helmtest.InstallIstioWithRevision(t, cs, h, tarGzSuffix, revisionChartSuffix, overrideValuesFile)
-		helmtest.VerifyInstallation(t, cs)
+		// install the latest charts with revision set to "latest"
+		overrideValuesFile = getValuesOverrides(t, s.Hub, s.Tag, latestRevisionTag)
+		helmtest.InstallIstioWithRevision(t, cs, h, tarGzSuffix, "-"+latestRevisionTag, overrideValuesFile, false)
+		helmtest.VerifyInstallation(t, cs, false)
+		helmtest.SetRevisionTag(t, h, tarGzSuffix, latestRevisionTag, canaryTag)
+		helmtest.VerifyMutatingWebhookConfigurations(t, cs, []string{"istio-revision-tag-prod", "istio-sidecar-injector-1-10-0","istio-revision-tag-canary", "istio-sidecar-injector-latest"})
 
 		// setup istio.io/rev=latest
-		_, newClient, newServer := sanitycheck.SetupTrafficTest(t, t, latestRevision)
+		_, newClient, newServer := sanitycheck.SetupTrafficTest(t, t, latestRevisionTag)
 		sanitycheck.RunTrafficTestClientServer(t, newClient, newServer)
 
 		// now check that we are compatible with N-1 proxy with N proxy
 		sanitycheck.RunTrafficTestClientServer(t, oldClient, newServer)
 
-		err = oldNs.RemoveLabel("istio.io/tag")
+		// set the revision tag for prod to point to the latest istiod
+		helmtest.SetRevisionTag(t, h, tarGzSuffix, latestRevisionTag, prodTag)
+
+		err = oldNs.RemoveLabel(istioRevLabel)
 		if err != nil {
-			t.Fatal("could not remove istio.io/tag label from namespace")
+			t.Fatal("could not remove istio.io/rev from old namespace")
 		}
-		err = oldNs.SetLabel("istio.io/tag", latestRevision)
+
+		err = oldNs.SetLabel(istioRevLabel, latestRevisionTag)
 		if err != nil {
-			t.Fatal("could not set istio.io/tag label on namespace")
+			t.Fatal("could not remove istio.io/rev from old namespace")
 		}
+
 		err = oldClient.Restart()
 		if err != nil {
 			t.Fatal("could not restart old client")
@@ -334,3 +316,4 @@ func performStableLabelRevisionUpgradeFunc(previousVersion string) func(framewor
 		sanitycheck.RunTrafficTestClientServer(t, oldClient, newServer)
 	}
 }
+
